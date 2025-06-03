@@ -1,0 +1,13 @@
+bin/
+dist/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.out
+*.test
+coverage.html
+.env
+.DS_Store
+.idea/
+.vscode/
