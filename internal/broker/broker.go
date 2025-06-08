@@ -8,9 +8,11 @@ import (
 )
 
 type Broker struct {
-	mu     sync.RWMutex
-	clock  func() time.Time
-	queues map[string]*queueState
+	mu        sync.RWMutex
+	clock     func() time.Time
+	queues    map[string]*queueState
+	exchanges map[string]*Exchange
+	bindings  map[string][]Binding
 }
 
 type queueState struct {
@@ -20,9 +22,108 @@ type queueState struct {
 
 func New() *Broker {
 	return &Broker{
-		clock:  func() time.Time { return time.Now().UTC() },
-		queues: make(map[string]*queueState),
+		clock:     func() time.Time { return time.Now().UTC() },
+		queues:    make(map[string]*queueState),
+		exchanges: make(map[string]*Exchange),
+		bindings:  make(map[string][]Binding),
 	}
+}
+
+func (b *Broker) DeclareExchange(spec ExchangeSpec) (*Exchange, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if existing, ok := b.exchanges[spec.Name]; ok {
+		if existing.ExchangeSpec != spec {
+			return nil, ErrExchangeExists
+		}
+
+		return existing, nil
+	}
+
+	exchange := &Exchange{ExchangeSpec: spec, CreatedAt: b.clock()}
+	b.exchanges[spec.Name] = exchange
+
+	return exchange, nil
+}
+
+func (b *Broker) Exchange(name string) (*Exchange, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	exchange, ok := b.exchanges[name]
+	if !ok {
+		return nil, ErrExchangeNotFound
+	}
+
+	return exchange, nil
+}
+
+func (b *Broker) Exchanges() []*Exchange {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	exchanges := make([]*Exchange, 0, len(b.exchanges))
+	for _, exchange := range b.exchanges {
+		exchanges = append(exchanges, exchange)
+	}
+
+	return exchanges
+}
+
+func (b *Broker) Bind(spec BindingSpec) (*Binding, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	exchange, ok := b.exchanges[spec.Exchange]
+	if !ok {
+		return nil, ErrExchangeNotFound
+	}
+
+	if _, ok := b.queues[spec.Queue]; !ok {
+		return nil, ErrQueueNotFound
+	}
+
+	if err := spec.Validate(exchange.Kind); err != nil {
+		return nil, err
+	}
+
+	for i := range b.bindings[spec.Exchange] {
+		if b.bindings[spec.Exchange][i].key() == spec.key() {
+			return &b.bindings[spec.Exchange][i], nil
+		}
+	}
+
+	binding := Binding{BindingSpec: spec, CreatedAt: b.clock()}
+	b.bindings[spec.Exchange] = append(b.bindings[spec.Exchange], binding)
+
+	return &binding, nil
+}
+
+func (b *Broker) Unbind(spec BindingSpec) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	existing := b.bindings[spec.Exchange]
+	for i := range existing {
+		if existing[i].key() == spec.key() {
+			b.bindings[spec.Exchange] = append(existing[:i], existing[i+1:]...)
+			return nil
+		}
+	}
+
+	return ErrBindingNotFound
+}
+
+func (b *Broker) Bindings(exchange string) []Binding {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	return append([]Binding(nil), b.bindings[exchange]...)
 }
 
 func (b *Broker) DeclareQueue(spec QueueSpec) (*Queue, error) {
