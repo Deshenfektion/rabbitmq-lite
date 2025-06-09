@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -207,6 +208,77 @@ func (b *Broker) Enqueue(queue string, pub message.Publication) (*message.Messag
 	state.pending = append(state.pending, msg)
 
 	return msg, nil
+}
+
+func (b *Broker) Publish(pub message.Publication) ([]*message.Message, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	exchange, ok := b.exchanges[pub.Exchange]
+	if !ok {
+		return nil, ErrExchangeNotFound
+	}
+
+	targets := b.matchLocked(exchange, pub.RoutingKey)
+	if len(targets) == 0 {
+		return nil, ErrUnroutable
+	}
+
+	now := b.clock()
+	routed := make([]*message.Message, 0, len(targets))
+
+	for _, name := range targets {
+		state := b.queues[name]
+
+		msg := message.New(pub, name, now)
+		msg.MaxAttempts = state.definition.MaxAttempts
+
+		if err := msg.Transition(message.StateQueued, now); err != nil {
+			return nil, err
+		}
+
+		state.pending = append(state.pending, msg)
+		routed = append(routed, msg)
+	}
+
+	return routed, nil
+}
+
+func (b *Broker) matchLocked(exchange *Exchange, routingKey string) []string {
+	seen := make(map[string]struct{})
+	matched := make([]string, 0, 4)
+
+	for _, binding := range b.bindings[exchange.Name] {
+		if _, duplicate := seen[binding.Queue]; duplicate {
+			continue
+		}
+
+		if _, live := b.queues[binding.Queue]; !live {
+			continue
+		}
+
+		if !bindingMatches(exchange.Kind, binding.RoutingKey, routingKey) {
+			continue
+		}
+
+		seen[binding.Queue] = struct{}{}
+		matched = append(matched, binding.Queue)
+	}
+
+	sort.Strings(matched)
+
+	return matched
+}
+
+func bindingMatches(kind ExchangeKind, pattern, routingKey string) bool {
+	switch kind {
+	case ExchangeFanout:
+		return true
+	case ExchangeDirect:
+		return pattern == routingKey
+	default:
+		return false
+	}
 }
 
 func (b *Broker) Dequeue(queue string) (*message.Message, error) {
