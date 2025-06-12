@@ -276,6 +276,8 @@ func bindingMatches(kind ExchangeKind, pattern, routingKey string) bool {
 		return true
 	case ExchangeDirect:
 		return pattern == routingKey
+	case ExchangeTopic:
+		return matchTopic(pattern, routingKey)
 	default:
 		return false
 	}
