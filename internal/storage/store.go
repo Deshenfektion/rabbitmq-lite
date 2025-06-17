@@ -113,7 +113,7 @@ type HistoryEvent struct {
 	At        time.Time     `json:"at"`
 }
 
-func (f DeadLetterFilter) normalise() DeadLetterFilter {
+func (f DeadLetterFilter) Normalise() DeadLetterFilter {
 	if f.Limit <= 0 || f.Limit > maxPageSize {
 		f.Limit = defaultPageSize
 	}
@@ -129,3 +129,4 @@ const (
 	defaultPageSize = 50
 	maxPageSize     = 500
 )
+
