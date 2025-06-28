@@ -453,3 +453,5 @@ func claimable(msg *message.Message, now time.Time) bool {
 func bindingKey(spec broker.BindingSpec) string {
 	return spec.Exchange + "\x00" + spec.Queue + "\x00" + spec.RoutingKey
 }
+
+var _ storage.Store = (*Store)(nil)

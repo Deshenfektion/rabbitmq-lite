@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deshenrao/rabbitmq-lite/internal/storage"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -115,3 +117,5 @@ func parseTime(value string) (time.Time, error) {
 
 	return parsed, nil
 }
+
+var _ storage.Store = (*Store)(nil)
