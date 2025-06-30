@@ -95,6 +95,19 @@ func (t *routingTable) bindingsFor(exchange string) []Binding {
 	return append([]Binding(nil), t.bindings[exchange]...)
 }
 
+func (t *routingTable) allBindings() []Binding {
+	bindings := make([]Binding, 0, len(t.bindings))
+	for _, group := range t.bindings {
+		bindings = append(bindings, group...)
+	}
+
+	sort.Slice(bindings, func(i, j int) bool {
+		return bindings[i].key() < bindings[j].key()
+	})
+
+	return bindings
+}
+
 func (t *routingTable) queueReferences(queue string) int {
 	references := 0
 

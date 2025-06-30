@@ -35,7 +35,7 @@ func TestMatchTopic(t *testing.T) {
 }
 
 func TestTopicExchangeRoutesToOverlappingBindings(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	if _, err := b.DeclareExchange(ExchangeSpec{Name: "erp.topic", Kind: ExchangeTopic}); err != nil {
 		t.Fatalf("declare exchange: %v", err)
@@ -56,7 +56,7 @@ func TestTopicExchangeRoutesToOverlappingBindings(t *testing.T) {
 }
 
 func TestTopicBindingPatternValidation(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	if _, err := b.DeclareExchange(ExchangeSpec{Name: "erp.topic", Kind: ExchangeTopic}); err != nil {
 		t.Fatalf("declare exchange: %v", err)

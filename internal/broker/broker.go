@@ -1,235 +1,201 @@
 package broker
 
 import (
+	"sort"
 	"sync"
 	"time"
-
-	"github.com/deshenrao/rabbitmq-lite/internal/message"
 )
 
-type Broker struct {
+type Registry struct {
 	mu      sync.RWMutex
 	clock   func() time.Time
 	routing *routingTable
-	queues  map[string]*queueState
+	queues  map[string]*Queue
 }
 
-type queueState struct {
-	definition *Queue
-	pending    []*message.Message
-}
-
-func New() *Broker {
-	return &Broker{
+func NewRegistry() *Registry {
+	return &Registry{
 		clock:   func() time.Time { return time.Now().UTC() },
 		routing: newRoutingTable(),
-		queues:  make(map[string]*queueState),
+		queues:  make(map[string]*Queue),
 	}
 }
 
-func (b *Broker) DeclareExchange(spec ExchangeSpec) (*Exchange, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) DeclareExchange(spec ExchangeSpec) (*Exchange, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	return b.routing.declareExchange(spec, b.clock())
+	return r.routing.declareExchange(spec, r.clock())
 }
 
-func (b *Broker) Exchange(name string) (*Exchange, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (r *Registry) Exchange(name string) (*Exchange, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	return b.routing.exchange(name)
+	return r.routing.exchange(name)
 }
 
-func (b *Broker) Exchanges() []*Exchange {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (r *Registry) Exchanges() []*Exchange {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	return b.routing.allExchanges()
+	return r.routing.allExchanges()
 }
 
-func (b *Broker) Bind(spec BindingSpec) (*Binding, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) Bind(spec BindingSpec) (*Binding, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if _, ok := b.queues[spec.Queue]; !ok {
+	if _, ok := r.queues[spec.Queue]; !ok {
 		return nil, ErrQueueNotFound
 	}
 
-	return b.routing.bind(spec, b.clock())
+	return r.routing.bind(spec, r.clock())
 }
 
-func (b *Broker) Unbind(spec BindingSpec) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) Unbind(spec BindingSpec) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	return b.routing.unbind(spec)
+	return r.routing.unbind(spec)
 }
 
-func (b *Broker) Bindings(exchange string) []Binding {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (r *Registry) Bindings(exchange string) []Binding {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	return b.routing.bindingsFor(exchange)
+	return r.routing.bindingsFor(exchange)
 }
 
-func (b *Broker) DeclareQueue(spec QueueSpec) (*Queue, error) {
+func (r *Registry) AllBindings() []Binding {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.routing.allBindings()
+}
+
+func (r *Registry) DeclareQueue(spec QueueSpec) (*Queue, error) {
 	spec = spec.withDefaults()
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if existing, ok := b.queues[spec.Name]; ok {
-		if existing.definition.QueueSpec != spec {
+	if existing, ok := r.queues[spec.Name]; ok {
+		if existing.QueueSpec != spec {
 			return nil, ErrQueueExists
 		}
 
-		return existing.definition, nil
+		return existing, nil
 	}
 
-	queue := &Queue{QueueSpec: spec, CreatedAt: b.clock()}
-	b.queues[spec.Name] = &queueState{definition: queue}
+	queue := &Queue{QueueSpec: spec, CreatedAt: r.clock()}
+	r.queues[spec.Name] = queue
 
 	return queue, nil
 }
 
-func (b *Broker) Queue(name string) (*Queue, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (r *Registry) Queue(name string) (*Queue, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	state, ok := b.queues[name]
+	queue, ok := r.queues[name]
 	if !ok {
 		return nil, ErrQueueNotFound
 	}
 
-	return state.definition, nil
+	return queue, nil
 }
 
-func (b *Broker) Queues() []*Queue {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (r *Registry) Queues() []*Queue {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	queues := make([]*Queue, 0, len(b.queues))
-	for _, state := range b.queues {
-		queues = append(queues, state.definition)
+	queues := make([]*Queue, 0, len(r.queues))
+	for _, queue := range r.queues {
+		queues = append(queues, queue)
 	}
+
+	sort.Slice(queues, func(i, j int) bool { return queues[i].Name < queues[j].Name })
 
 	return queues
 }
 
-func (b *Broker) DeleteQueue(name string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) QueueNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	if _, ok := b.queues[name]; !ok {
+	names := make([]string, 0, len(r.queues))
+	for name := range r.queues {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
+}
+
+func (r *Registry) DeleteQueue(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.queues[name]; !ok {
 		return ErrQueueNotFound
 	}
 
-	if b.routing.queueReferences(name) > 0 {
+	if r.routing.queueReferences(name) > 0 {
 		return ErrQueueInUse
 	}
 
-	delete(b.queues, name)
+	delete(r.queues, name)
 
 	return nil
 }
 
-func (b *Broker) Publish(pub message.Publication) ([]*message.Message, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) Route(exchange, routingKey string) ([]*Queue, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	exchange, err := b.routing.exchange(pub.Exchange)
+	definition, err := r.routing.exchange(exchange)
 	if err != nil {
 		return nil, err
 	}
 
-	targets := b.routing.route(exchange, pub.RoutingKey, b.queueExistsLocked)
-	if len(targets) == 0 {
+	names := r.routing.route(definition, routingKey, r.queueExistsLocked)
+	if len(names) == 0 {
 		return nil, ErrUnroutable
 	}
 
-	now := b.clock()
-	routed := make([]*message.Message, 0, len(targets))
-
-	for _, name := range targets {
-		msg, err := b.enqueueLocked(name, pub, now)
-		if err != nil {
-			return nil, err
-		}
-
-		routed = append(routed, msg)
+	queues := make([]*Queue, 0, len(names))
+	for _, name := range names {
+		queues = append(queues, r.queues[name])
 	}
 
-	return routed, nil
+	return queues, nil
 }
 
-func (b *Broker) Enqueue(queue string, pub message.Publication) (*message.Message, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (r *Registry) Restore(exchanges []*Exchange, queues []*Queue, bindings []Binding) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if _, ok := b.queues[queue]; !ok {
-		return nil, ErrQueueNotFound
+	for _, exchange := range exchanges {
+		copied := *exchange
+		r.routing.exchanges[exchange.Name] = &copied
 	}
 
-	return b.enqueueLocked(queue, pub, b.clock())
-}
-
-func (b *Broker) enqueueLocked(queue string, pub message.Publication, now time.Time) (*message.Message, error) {
-	state := b.queues[queue]
-
-	msg := message.New(pub, queue, now)
-	msg.MaxAttempts = state.definition.MaxAttempts
-
-	if err := msg.Transition(message.StateQueued, now); err != nil {
-		return nil, err
+	for _, queue := range queues {
+		copied := *queue
+		r.queues[queue.Name] = &copied
 	}
 
-	state.pending = append(state.pending, msg)
-
-	return msg, nil
+	for _, binding := range bindings {
+		r.routing.bindings[binding.Exchange] = append(r.routing.bindings[binding.Exchange], binding)
+	}
 }
 
-func (b *Broker) queueExistsLocked(name string) bool {
-	_, ok := b.queues[name]
+func (r *Registry) queueExistsLocked(name string) bool {
+	_, ok := r.queues[name]
 	return ok
-}
-
-func (b *Broker) Dequeue(queue string) (*message.Message, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	state, ok := b.queues[queue]
-	if !ok {
-		return nil, ErrQueueNotFound
-	}
-
-	if len(state.pending) == 0 {
-		return nil, ErrMessageNotFound
-	}
-
-	msg := state.pending[0]
-	state.pending = state.pending[1:]
-
-	if err := msg.Transition(message.StateProcessing, b.clock()); err != nil {
-		return nil, err
-	}
-
-	msg.Attempts++
-
-	return msg, nil
-}
-
-func (b *Broker) Depth(queue string) (int, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	state, ok := b.queues[queue]
-	if !ok {
-		return 0, ErrQueueNotFound
-	}
-
-	return len(state.pending), nil
 }

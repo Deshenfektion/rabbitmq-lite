@@ -1,19 +1,16 @@
 package broker
 
 import (
-	"encoding/json"
 	"errors"
 	"sort"
 	"testing"
 	"time"
-
-	"github.com/deshenrao/rabbitmq-lite/internal/message"
 )
 
-func newTestBroker(t *testing.T) *Broker {
+func newTestRegistry(t *testing.T) *Registry {
 	t.Helper()
 
-	b := New()
+	b := NewRegistry()
 
 	if _, err := b.DeclareExchange(ExchangeSpec{Name: "erp.events", Kind: ExchangeDirect}); err != nil {
 		t.Fatalf("declare exchange: %v", err)
@@ -22,7 +19,7 @@ func newTestBroker(t *testing.T) *Broker {
 	return b
 }
 
-func declareQueue(t *testing.T, b *Broker, name string) {
+func declareQueue(t *testing.T, b *Registry, name string) {
 	t.Helper()
 
 	if _, err := b.DeclareQueue(QueueSpec{Name: name, Durable: true}); err != nil {
@@ -30,7 +27,7 @@ func declareQueue(t *testing.T, b *Broker, name string) {
 	}
 }
 
-func bind(t *testing.T, b *Broker, exchange, queue, key string) {
+func bind(t *testing.T, b *Registry, exchange, queue, key string) {
 	t.Helper()
 
 	if _, err := b.Bind(BindingSpec{Exchange: exchange, Queue: queue, RoutingKey: key}); err != nil {
@@ -38,21 +35,17 @@ func bind(t *testing.T, b *Broker, exchange, queue, key string) {
 	}
 }
 
-func routedQueues(t *testing.T, b *Broker, exchange, key string) []string {
+func routedQueues(t *testing.T, b *Registry, exchange, key string) []string {
 	t.Helper()
 
-	routed, err := b.Publish(message.Publication{
-		Exchange:   exchange,
-		RoutingKey: key,
-		Payload:    json.RawMessage(`{}`),
-	})
+	routed, err := b.Route(exchange, key)
 	if err != nil {
-		t.Fatalf("publish: %v", err)
+		t.Fatalf("route: %v", err)
 	}
 
 	names := make([]string, 0, len(routed))
-	for _, msg := range routed {
-		names = append(names, msg.Queue)
+	for _, queue := range routed {
+		names = append(names, queue.Name)
 	}
 
 	sort.Strings(names)
@@ -61,7 +54,7 @@ func routedQueues(t *testing.T, b *Broker, exchange, key string) []string {
 }
 
 func TestDeclareQueueAppliesDefaults(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	queue, err := b.DeclareQueue(QueueSpec{Name: "invoice-processing"})
 	if err != nil {
@@ -78,7 +71,7 @@ func TestDeclareQueueAppliesDefaults(t *testing.T) {
 }
 
 func TestDeclareQueueIsIdempotentForIdenticalSpecs(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	spec := QueueSpec{Name: "invoice-processing", Durable: true, MaxAttempts: 5, VisibilityTimeout: time.Minute}
 
@@ -98,7 +91,7 @@ func TestDeclareQueueIsIdempotentForIdenticalSpecs(t *testing.T) {
 }
 
 func TestDeclareQueueRejectsConflictingRedeclaration(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	if _, err := b.DeclareQueue(QueueSpec{Name: "invoice-processing", MaxAttempts: 3}); err != nil {
 		t.Fatalf("declare: %v", err)
@@ -111,7 +104,7 @@ func TestDeclareQueueRejectsConflictingRedeclaration(t *testing.T) {
 }
 
 func TestDeclareQueueRejectsInvalidNames(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	for _, name := range []string{"", ".leading", "has space", "tab\t"} {
 		if _, err := b.DeclareQueue(QueueSpec{Name: name}); err == nil {
@@ -121,7 +114,7 @@ func TestDeclareQueueRejectsInvalidNames(t *testing.T) {
 }
 
 func TestDirectExchangeRoutesByExactKey(t *testing.T) {
-	b := newTestBroker(t)
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 	declareQueue(t, b, "invoice-processing")
@@ -134,7 +127,7 @@ func TestDirectExchangeRoutesByExactKey(t *testing.T) {
 }
 
 func TestFanoutExchangeIgnoresRoutingKey(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
 	if _, err := b.DeclareExchange(ExchangeSpec{Name: "erp.broadcast", Kind: ExchangeFanout}); err != nil {
 		t.Fatalf("declare exchange: %v", err)
@@ -152,28 +145,28 @@ func TestFanoutExchangeIgnoresRoutingKey(t *testing.T) {
 }
 
 func TestPublishToUnboundKeyIsUnroutable(t *testing.T) {
-	b := newTestBroker(t)
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 	bind(t, b, "erp.events", "customer-sync", "customer.created")
 
-	_, err := b.Publish(message.Publication{Exchange: "erp.events", RoutingKey: "customer.deleted"})
+	_, err := b.Route("erp.events", "customer.deleted")
 	if !errors.Is(err, ErrUnroutable) {
 		t.Fatalf("expected ErrUnroutable, got %v", err)
 	}
 }
 
 func TestPublishToUnknownExchangeFails(t *testing.T) {
-	b := New()
+	b := NewRegistry()
 
-	_, err := b.Publish(message.Publication{Exchange: "missing", RoutingKey: "x"})
+	_, err := b.Route("missing", "x")
 	if !errors.Is(err, ErrExchangeNotFound) {
 		t.Fatalf("expected ErrExchangeNotFound, got %v", err)
 	}
 }
 
 func TestDuplicateBindingsDeliverOnce(t *testing.T) {
-	b := newTestBroker(t)
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 	bind(t, b, "erp.events", "customer-sync", "customer.created")
@@ -185,7 +178,7 @@ func TestDuplicateBindingsDeliverOnce(t *testing.T) {
 }
 
 func TestUnbindStopsDelivery(t *testing.T) {
-	b := newTestBroker(t)
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 	spec := BindingSpec{Exchange: "erp.events", Queue: "customer-sync", RoutingKey: "customer.created"}
@@ -195,7 +188,7 @@ func TestUnbindStopsDelivery(t *testing.T) {
 		t.Fatalf("unbind: %v", err)
 	}
 
-	if _, err := b.Publish(message.Publication{Exchange: "erp.events", RoutingKey: "customer.created"}); !errors.Is(err, ErrUnroutable) {
+	if _, err := b.Route("erp.events", "customer.created"); !errors.Is(err, ErrUnroutable) {
 		t.Fatalf("expected ErrUnroutable after unbind, got %v", err)
 	}
 
@@ -205,7 +198,7 @@ func TestUnbindStopsDelivery(t *testing.T) {
 }
 
 func TestDirectBindingRejectsWildcards(t *testing.T) {
-	b := newTestBroker(t)
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 
@@ -214,35 +207,58 @@ func TestDirectBindingRejectsWildcards(t *testing.T) {
 	}
 }
 
-func TestPublishedMessagesEnterQueuedState(t *testing.T) {
-	b := newTestBroker(t)
+func TestRouteReturnsQueueDefinitions(t *testing.T) {
+	b := newTestRegistry(t)
+
+	if _, err := b.DeclareQueue(QueueSpec{Name: "customer-sync", Durable: true, MaxAttempts: 5, VisibilityTimeout: time.Minute}); err != nil {
+		t.Fatalf("declare queue: %v", err)
+	}
+
+	bind(t, b, "erp.events", "customer-sync", "customer.created")
+
+	routed, err := b.Route("erp.events", "customer.created")
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	if len(routed) != 1 || routed[0].MaxAttempts != 5 {
+		t.Fatalf("expected queue definition to be returned, got %+v", routed)
+	}
+}
+
+func TestDeleteQueueRejectsBoundQueues(t *testing.T) {
+	b := newTestRegistry(t)
 
 	declareQueue(t, b, "customer-sync")
 	bind(t, b, "erp.events", "customer-sync", "customer.created")
 
-	routed, err := b.Publish(message.Publication{
-		Exchange:   "erp.events",
-		RoutingKey: "customer.created",
-		Payload:    json.RawMessage(`{"customer_id":"C-1"}`),
-	})
+	if err := b.DeleteQueue("customer-sync"); !errors.Is(err, ErrQueueInUse) {
+		t.Fatalf("expected ErrQueueInUse, got %v", err)
+	}
+
+	if err := b.Unbind(BindingSpec{Exchange: "erp.events", Queue: "customer-sync", RoutingKey: "customer.created"}); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+
+	if err := b.DeleteQueue("customer-sync"); err != nil {
+		t.Fatalf("delete queue: %v", err)
+	}
+}
+
+func TestRestoreRebuildsTopology(t *testing.T) {
+	source := newTestRegistry(t)
+	declareQueue(t, source, "customer-sync")
+	bind(t, source, "erp.events", "customer-sync", "customer.created")
+
+	restored := NewRegistry()
+	restored.Restore(source.Exchanges(), source.Queues(), source.AllBindings())
+
+	routed, err := restored.Route("erp.events", "customer.created")
 	if err != nil {
-		t.Fatalf("publish: %v", err)
+		t.Fatalf("route after restore: %v", err)
 	}
 
-	if routed[0].State != message.StateQueued {
-		t.Fatalf("expected QUEUED, got %s", routed[0].State)
-	}
-
-	if routed[0].MaxAttempts != defaultMaxAttempts {
-		t.Fatalf("expected queue max attempts to be inherited, got %d", routed[0].MaxAttempts)
-	}
-
-	depth, err := b.Depth("customer-sync")
-	if err != nil {
-		t.Fatalf("depth: %v", err)
-	}
-
-	if depth != 1 {
-		t.Fatalf("expected depth 1, got %d", depth)
+	if len(routed) != 1 || routed[0].Name != "customer-sync" {
+		t.Fatalf("unexpected restored routing %+v", routed)
 	}
 }
