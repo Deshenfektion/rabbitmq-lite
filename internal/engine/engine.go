@@ -5,24 +5,37 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/deshenrao/rabbitmq-lite/internal/broker"
 	"github.com/deshenrao/rabbitmq-lite/internal/message"
+	"github.com/deshenrao/rabbitmq-lite/internal/retry"
 	"github.com/deshenrao/rabbitmq-lite/internal/storage"
 )
 
 type Options struct {
-	Store  storage.Store
-	Clock  func() time.Time
-	Logger *slog.Logger
+	Store      storage.Store
+	Clock      func() time.Time
+	Logger     *slog.Logger
+	Retry      retry.Policy
+	Randomiser retry.Randomiser
 }
 
 type Engine struct {
-	store    storage.Store
-	registry *broker.Registry
-	clock    func() time.Time
-	logger   *slog.Logger
+	store      storage.Store
+	registry   *broker.Registry
+	clock      func() time.Time
+	logger     *slog.Logger
+	policy     retry.Policy
+	randomiser retry.Randomiser
+
+	mu        sync.RWMutex
+	consumers map[string]*Consumer
+	signals   map[string]chan struct{}
+	rootCtx   context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 type PublishResult struct {
@@ -45,12 +58,68 @@ func New(opts Options) (*Engine, error) {
 		opts.Logger = slog.Default()
 	}
 
+	policy := opts.Retry.WithDefaults()
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &Engine{
-		store:    opts.Store,
-		registry: broker.NewRegistry(),
-		clock:    opts.Clock,
-		logger:   opts.Logger,
+		store:      opts.Store,
+		registry:   broker.NewRegistry(),
+		clock:      opts.Clock,
+		logger:     opts.Logger,
+		policy:     policy,
+		randomiser: opts.Randomiser,
+		consumers:  make(map[string]*Consumer),
+		signals:    make(map[string]chan struct{}),
 	}, nil
+}
+
+func (e *Engine) Start(ctx context.Context) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.rootCtx != nil {
+		return
+	}
+
+	e.rootCtx, e.cancel = context.WithCancel(ctx)
+}
+
+func (e *Engine) Shutdown(ctx context.Context) error {
+	e.mu.Lock()
+	cancel := e.cancel
+	consumers := make([]*Consumer, 0, len(e.consumers))
+	for _, consumer := range e.consumers {
+		consumers = append(consumers, consumer)
+	}
+	e.consumers = make(map[string]*Consumer)
+	e.rootCtx = nil
+	e.cancel = nil
+	e.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	drained := make(chan struct{})
+
+	go func() {
+		for _, consumer := range consumers {
+			consumer.Stop()
+		}
+
+		e.wg.Wait()
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		e.logger.Info("engine shutdown complete", slog.Int("consumers", len(consumers)))
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("engine: shutdown timed out: %w", ctx.Err())
+	}
 }
 
 func (e *Engine) Registry() *broker.Registry {
@@ -200,6 +269,8 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 			At:        now,
 		})
 	}
+
+	e.notify(result.Queues)
 
 	return result, nil
 }
