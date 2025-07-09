@@ -97,15 +97,9 @@ func (e *Engine) Consumers() []ConsumerStatus {
 
 func (e *Engine) dispatch(ctx context.Context, consumer *Consumer) {
 	signal := e.queueSignal(consumer.spec.Queue)
-	idle := time.NewTimer(idlePollInterval)
-	defer idle.Stop()
 
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		claimed, err := e.claim(ctx, consumer)
+	for ctx.Err() == nil {
+		claimed, err := e.claimBatch(ctx, consumer)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -122,18 +116,22 @@ func (e *Engine) dispatch(ctx context.Context, consumer *Consumer) {
 			continue
 		}
 
-		idle.Reset(idlePollInterval)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-signal:
-		case <-idle.C:
-		}
+		waitForWork(ctx, signal)
 	}
 }
 
-func (e *Engine) claim(ctx context.Context, consumer *Consumer) (int, error) {
+func waitForWork(ctx context.Context, signal <-chan struct{}) {
+	idle := time.NewTimer(idlePollInterval)
+	defer idle.Stop()
+
+	select {
+	case <-ctx.Done():
+	case <-signal:
+	case <-idle.C:
+	}
+}
+
+func (e *Engine) claimBatch(ctx context.Context, consumer *Consumer) (int, error) {
 	queue, err := e.registry.Queue(consumer.spec.Queue)
 	if err != nil {
 		return 0, err
@@ -151,36 +149,49 @@ func (e *Engine) claim(ctx context.Context, consumer *Consumer) (int, error) {
 	}
 
 	for _, msg := range messages {
-		delivery := Delivery{Message: msg, Attempt: msg.Attempts, Queue: msg.Queue}
-
-		e.recordHistory(ctx, storage.HistoryEvent{
-			MessageID: msg.ID,
-			Queue:     msg.Queue,
-			From:      message.StateQueued,
-			To:        message.StateProcessing,
-			Consumer:  consumer.spec.Name,
-			At:        e.clock(),
-		})
-
-		if err := consumer.pool.Submit(ctx, func(taskCtx context.Context) {
-			e.process(taskCtx, consumer, delivery)
-		}); err != nil {
-			if releaseErr := e.store.Release(context.WithoutCancel(ctx), msg.ID, e.clock()); releaseErr != nil {
-				e.logger.Error("failed to release undispatched message",
-					slog.String("message_id", msg.ID),
-					slog.String("error", releaseErr.Error()),
-				)
-			}
-
-			if errors.Is(err, worker.ErrPoolStopped) || ctx.Err() != nil {
-				return len(messages), nil
-			}
-
+		if err := e.handOff(ctx, consumer, msg); err != nil {
 			return len(messages), err
 		}
 	}
 
 	return len(messages), nil
+}
+
+func (e *Engine) handOff(ctx context.Context, consumer *Consumer, msg *message.Message) error {
+	delivery := Delivery{Message: msg, Attempt: msg.Attempts, Queue: msg.Queue}
+
+	e.recordHistory(ctx, storage.HistoryEvent{
+		MessageID: msg.ID,
+		Queue:     msg.Queue,
+		From:      message.StateQueued,
+		To:        message.StateProcessing,
+		Consumer:  consumer.spec.Name,
+		At:        e.clock(),
+	})
+
+	err := consumer.pool.Submit(ctx, func(taskCtx context.Context) {
+		e.process(taskCtx, consumer, delivery)
+	})
+	if err == nil {
+		return nil
+	}
+
+	e.releaseUndispatched(ctx, msg.ID)
+
+	if errors.Is(err, worker.ErrPoolStopped) || ctx.Err() != nil {
+		return nil
+	}
+
+	return err
+}
+
+func (e *Engine) releaseUndispatched(ctx context.Context, id string) {
+	if err := e.store.Release(context.WithoutCancel(ctx), id, e.clock()); err != nil {
+		e.logger.Error("failed to release undispatched message",
+			slog.String("message_id", id),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 func (e *Engine) process(ctx context.Context, consumer *Consumer, delivery Delivery) {

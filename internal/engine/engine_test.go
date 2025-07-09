@@ -328,16 +328,15 @@ func TestConcurrentConsumersDrainBacklog(t *testing.T) {
 		publishInvoice(t, instance, "INV-BULK-"+string(rune('A'+i%26)))
 	}
 
-	waitFor(t, "backlog to drain", func() bool { return processed.Load() == total })
+	waitFor(t, "backlog to drain", func() bool {
+		if processed.Load() != total {
+			return false
+		}
 
-	depth, err := instance.Depth(context.Background(), "invoice-processing")
-	if err != nil {
-		t.Fatalf("depth: %v", err)
-	}
+		depth, err := instance.Depth(context.Background(), "invoice-processing")
 
-	if depth.Total != 0 {
-		t.Fatalf("expected empty queue, got %+v", depth)
-	}
+		return err == nil && depth.Total == 0
+	})
 }
 
 func TestSubscribeRejectsDuplicateConsumerNames(t *testing.T) {
