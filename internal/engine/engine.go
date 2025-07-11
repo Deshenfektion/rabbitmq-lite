@@ -20,6 +20,8 @@ type Options struct {
 	Logger     *slog.Logger
 	Retry      retry.Policy
 	Randomiser retry.Randomiser
+
+	ReclaimInterval time.Duration
 }
 
 type Engine struct {
@@ -29,6 +31,8 @@ type Engine struct {
 	logger     *slog.Logger
 	policy     retry.Policy
 	randomiser retry.Randomiser
+
+	reclaimInterval time.Duration
 
 	mu        sync.RWMutex
 	consumers map[string]*Consumer
@@ -63,6 +67,10 @@ func New(opts Options) (*Engine, error) {
 		return nil, err
 	}
 
+	if opts.ReclaimInterval <= 0 {
+		opts.ReclaimInterval = defaultReclaimInterval
+	}
+
 	return &Engine{
 		store:      opts.Store,
 		registry:   broker.NewRegistry(),
@@ -70,8 +78,11 @@ func New(opts Options) (*Engine, error) {
 		logger:     opts.Logger,
 		policy:     policy,
 		randomiser: opts.Randomiser,
-		consumers:  make(map[string]*Consumer),
-		signals:    make(map[string]chan struct{}),
+
+		reclaimInterval: opts.ReclaimInterval,
+
+		consumers: make(map[string]*Consumer),
+		signals:   make(map[string]chan struct{}),
 	}, nil
 }
 
@@ -84,6 +95,8 @@ func (e *Engine) Start(ctx context.Context) {
 	}
 
 	e.rootCtx, e.cancel = context.WithCancel(ctx)
+
+	e.startMaintenance(e.rootCtx)
 }
 
 func (e *Engine) Shutdown(ctx context.Context) error {
