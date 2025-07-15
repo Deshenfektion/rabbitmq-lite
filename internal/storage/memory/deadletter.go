@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"time"
 
 	"github.com/deshenrao/rabbitmq-lite/internal/message"
 	"github.com/deshenrao/rabbitmq-lite/internal/storage"
@@ -77,6 +78,22 @@ func (s *Store) DeadLetter(_ context.Context, id string) (*storage.DeadLetter, e
 	copied := *entry
 
 	return &copied, nil
+}
+
+func (s *Store) MarkDeadLetterReplayed(_ context.Context, id string, replayedAs string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, ok := s.deadLetters[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+
+	entry.ReplayedAs = replayedAs
+	entry.ReplayedAt = at.UTC()
+	entry.ReplayCount++
+
+	return nil
 }
 
 func (s *Store) DeleteDeadLetter(_ context.Context, id string) error {

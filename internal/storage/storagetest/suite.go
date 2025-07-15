@@ -566,6 +566,27 @@ func testDeadLetterLifecycle(t *testing.T, store storage.Store) {
 		t.Fatalf("expected count 1, got %d", count)
 	}
 
+	if err := store.MarkDeadLetterReplayed(ctx, entry.ID, "replay-1", base.Add(time.Minute)); err != nil {
+		t.Fatalf("mark replayed: %v", err)
+	}
+
+	replayed, err := store.DeadLetter(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("dead letter: %v", err)
+	}
+
+	if replayed.ReplayedAs != "replay-1" || replayed.ReplayCount != 1 {
+		t.Fatalf("expected replay metadata to be recorded, got %+v", replayed)
+	}
+
+	if !replayed.ReplayedAt.Equal(base.Add(time.Minute)) {
+		t.Fatalf("unexpected replay timestamp %s", replayed.ReplayedAt)
+	}
+
+	if err := store.MarkDeadLetterReplayed(ctx, "missing", "replay-2", base); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
 	if err := store.DeleteDeadLetter(ctx, entry.ID); err != nil {
 		t.Fatalf("delete dead letter: %v", err)
 	}

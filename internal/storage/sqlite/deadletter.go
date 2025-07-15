@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/deshenrao/rabbitmq-lite/internal/message"
 	"github.com/deshenrao/rabbitmq-lite/internal/storage"
 )
 
 const deadLetterColumns = `id, message_id, queue, exchange, routing_key, schema_name, payload, headers,
-	reason, error_kind, attempts, published_at, first_failed_at, dead_lettered_at, replayed_as, replay_count`
+	reason, error_kind, attempts, published_at, first_failed_at, dead_lettered_at,
+	replayed_as, replayed_at, replay_count`
 
 func (s *Store) SaveDeadLetter(ctx context.Context, entry *storage.DeadLetter) error {
 	if entry.ID == "" {
@@ -25,11 +27,11 @@ func (s *Store) SaveDeadLetter(ctx context.Context, entry *storage.DeadLetter) e
 
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO dead_letters (`+deadLetterColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.MessageID, entry.Queue, entry.Exchange, entry.RoutingKey, entry.Schema,
 		[]byte(entry.Payload), headers, entry.Reason, entry.ErrorKind, entry.Attempts,
 		formatTime(entry.PublishedAt), formatTime(entry.FirstFailedAt), formatTime(entry.DeadLetteredAt),
-		entry.ReplayedAs, entry.ReplayedAtCount,
+		entry.ReplayedAs, formatTime(entry.ReplayedAt), entry.ReplayCount,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -89,6 +91,29 @@ func (s *Store) DeadLetter(ctx context.Context, id string) (*storage.DeadLetter,
 	return entry, nil
 }
 
+func (s *Store) MarkDeadLetterReplayed(ctx context.Context, id string, replayedAs string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE dead_letters
+		 SET replayed_as = ?, replayed_at = ?, replay_count = replay_count + 1
+		 WHERE id = ?`,
+		replayedAs, formatTime(at), id,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: mark dead letter replayed %s: %w", id, err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: mark dead letter replayed %s: %w", id, err)
+	}
+
+	if affected == 0 {
+		return storage.ErrNotFound
+	}
+
+	return nil
+}
+
 func (s *Store) DeleteDeadLetter(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM dead_letters WHERE id = ?`, id)
 	if err != nil {
@@ -132,12 +157,13 @@ func scanDeadLetter(row scanner) (*storage.DeadLetter, error) {
 		published string
 		first     string
 		dead      string
+		replayed  string
 	)
 
 	if err := row.Scan(
 		&entry.ID, &entry.MessageID, &entry.Queue, &entry.Exchange, &entry.RoutingKey, &entry.Schema,
 		&payload, &headers, &entry.Reason, &entry.ErrorKind, &entry.Attempts,
-		&published, &first, &dead, &entry.ReplayedAs, &entry.ReplayedAtCount,
+		&published, &first, &dead, &entry.ReplayedAs, &replayed, &entry.ReplayCount,
 	); err != nil {
 		return nil, err
 	}
@@ -160,6 +186,10 @@ func scanDeadLetter(row scanner) (*storage.DeadLetter, error) {
 	}
 
 	if entry.DeadLetteredAt, err = parseTime(dead); err != nil {
+		return nil, err
+	}
+
+	if entry.ReplayedAt, err = parseTime(replayed); err != nil {
 		return nil, err
 	}
 

@@ -13,7 +13,17 @@ const (
 	errorKindHandler   = "handler"
 	errorKindPermanent = "permanent"
 	errorKindExpired   = "lease_expired"
+
+	headerReplayOf     = "x-replay-of"
+	headerDeadLetterID = "x-dead-letter-id"
 )
+
+type ReplayResult struct {
+	DeadLetterID      string `json:"dead_letter_id"`
+	OriginalMessageID string `json:"original_message_id"`
+	MessageID         string `json:"message_id"`
+	Queue             string `json:"queue"`
+}
 
 func (e *Engine) deadLetter(ctx context.Context, consumer string, delivery Delivery, cause error, now time.Time) {
 	record := &storage.DeadLetter{
@@ -106,4 +116,70 @@ func classify(cause error) string {
 	}
 
 	return errorKindHandler
+}
+
+func (e *Engine) ReplayDeadLetter(ctx context.Context, id string) (*ReplayResult, error) {
+	record, err := e.store.DeadLetter(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	queue, err := e.registry.Queue(record.Queue)
+	if err != nil {
+		return nil, err
+	}
+
+	now := e.clock()
+
+	replay := message.New(message.Publication{
+		Exchange:   record.Exchange,
+		RoutingKey: record.RoutingKey,
+		Payload:    record.Payload,
+		Headers:    record.Headers,
+		Schema:     record.Schema,
+	}, queue.Name, now)
+
+	replay.MaxAttempts = queue.MaxAttempts
+	replay.SetHeader(headerReplayOf, record.MessageID)
+	replay.SetHeader(headerDeadLetterID, record.ID)
+
+	if err := replay.Transition(message.StateQueued, now); err != nil {
+		return nil, err
+	}
+
+	if err := e.store.Append(ctx, []*message.Message{replay}); err != nil {
+		return nil, err
+	}
+
+	e.recordHistory(ctx, storage.HistoryEvent{
+		MessageID: replay.ID,
+		Queue:     replay.Queue,
+		From:      message.StateCreated,
+		To:        message.StateQueued,
+		Detail:    "replayed from dead letter " + record.ID,
+		At:        now,
+	})
+
+	if err := e.store.MarkDeadLetterReplayed(ctx, record.ID, replay.ID, now); err != nil {
+		e.logger.Error("failed to mark dead letter as replayed",
+			slog.String("dead_letter_id", record.ID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	e.notify([]string{queue.Name})
+
+	e.logger.Info("dead letter replayed",
+		slog.String("dead_letter_id", record.ID),
+		slog.String("original_message_id", record.MessageID),
+		slog.String("message_id", replay.ID),
+		slog.String("queue", queue.Name),
+	)
+
+	return &ReplayResult{
+		DeadLetterID:      record.ID,
+		OriginalMessageID: record.MessageID,
+		MessageID:         replay.ID,
+		Queue:             queue.Name,
+	}, nil
 }

@@ -89,6 +89,7 @@ var migrations = []migration{
 				first_failed_at  TEXT NOT NULL,
 				dead_lettered_at TEXT NOT NULL,
 				replayed_as      TEXT NOT NULL DEFAULT '',
+				replayed_at      TEXT NOT NULL DEFAULT '',
 				replay_count     INTEGER NOT NULL DEFAULT 0
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_dead_letters_queue

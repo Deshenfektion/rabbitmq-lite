@@ -46,6 +46,7 @@ type DeadLetterStore interface {
 	SaveDeadLetter(ctx context.Context, record *DeadLetter) error
 	DeadLetters(ctx context.Context, filter DeadLetterFilter) ([]*DeadLetter, error)
 	DeadLetter(ctx context.Context, id string) (*DeadLetter, error)
+	MarkDeadLetterReplayed(ctx context.Context, id string, replayedAs string, at time.Time) error
 	DeleteDeadLetter(ctx context.Context, id string) error
 	CountDeadLetters(ctx context.Context, queue string) (int, error)
 }
@@ -79,22 +80,23 @@ type Depth struct {
 }
 
 type DeadLetter struct {
-	ID              string            `json:"id"`
-	MessageID       string            `json:"message_id"`
-	Queue           string            `json:"queue"`
-	Exchange        string            `json:"exchange"`
-	RoutingKey      string            `json:"routing_key"`
-	Schema          string            `json:"schema,omitempty"`
-	Payload         json.RawMessage   `json:"payload"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	Reason          string            `json:"reason"`
-	ErrorKind       string            `json:"error_kind"`
-	Attempts        int               `json:"attempts"`
-	PublishedAt     time.Time         `json:"published_at"`
-	FirstFailedAt   time.Time         `json:"first_failed_at"`
-	DeadLetteredAt  time.Time         `json:"dead_lettered_at"`
-	ReplayedAs      string            `json:"replayed_as,omitempty"`
-	ReplayedAtCount int               `json:"replay_count"`
+	ID             string            `json:"id"`
+	MessageID      string            `json:"message_id"`
+	Queue          string            `json:"queue"`
+	Exchange       string            `json:"exchange"`
+	RoutingKey     string            `json:"routing_key"`
+	Schema         string            `json:"schema,omitempty"`
+	Payload        json.RawMessage   `json:"payload"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Reason         string            `json:"reason"`
+	ErrorKind      string            `json:"error_kind"`
+	Attempts       int               `json:"attempts"`
+	PublishedAt    time.Time         `json:"published_at"`
+	FirstFailedAt  time.Time         `json:"first_failed_at"`
+	DeadLetteredAt time.Time         `json:"dead_lettered_at"`
+	ReplayedAs     string            `json:"replayed_as,omitempty"`
+	ReplayedAt     time.Time         `json:"replayed_at,omitzero"`
+	ReplayCount    int               `json:"replay_count"`
 }
 
 type DeadLetterFilter struct {
@@ -129,4 +131,3 @@ const (
 	defaultPageSize = 50
 	maxPageSize     = 500
 )
-
