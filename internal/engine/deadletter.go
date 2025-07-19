@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,6 +15,7 @@ const (
 	errorKindPermanent = "permanent"
 	errorKindExpired   = "lease_expired"
 
+	headerConsumer     = "x-consumer"
 	headerReplayOf     = "x-replay-of"
 	headerDeadLetterID = "x-dead-letter-id"
 )
@@ -111,11 +113,14 @@ func (e *Engine) firstFailureAt(ctx context.Context, messageID string, fallback 
 }
 
 func classify(cause error) string {
-	if isPermanent(cause) {
+	switch {
+	case errors.Is(cause, errLeaseExpired):
+		return errorKindExpired
+	case isPermanent(cause):
 		return errorKindPermanent
+	default:
+		return errorKindHandler
 	}
-
-	return errorKindHandler
 }
 
 func (e *Engine) ReplayDeadLetter(ctx context.Context, id string) (*ReplayResult, error) {

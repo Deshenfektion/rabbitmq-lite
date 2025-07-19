@@ -162,50 +162,23 @@ func (s *Store) MarkDeadLettered(ctx context.Context, id string, reason string, 
 	return tx.Commit()
 }
 
-func (s *Store) ReclaimExpiredLeases(ctx context.Context, now time.Time) ([]*message.Message, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("sqlite: reclaim leases: %w", err)
+func (s *Store) ExpiredLeases(ctx context.Context, now time.Time, limit int) ([]*message.Message, error) {
+	if limit <= 0 {
+		limit = -1
 	}
-	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(ctx,
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+messageColumns+` FROM messages
 		 WHERE state = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
-		 ORDER BY seq`,
-		string(message.StateProcessing), formatTime(now),
+		 ORDER BY seq
+		 LIMIT ?`,
+		string(message.StateProcessing), formatTime(now), limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: reclaim leases: %w", err)
+		return nil, fmt.Errorf("sqlite: read expired leases: %w", err)
 	}
 
-	expired, err := scanMessages(rows)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, msg := range expired {
-		if err := msg.Transition(message.StateQueued, now); err != nil {
-			return nil, err
-		}
-
-		msg.AvailableAt = now.UTC()
-
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE messages
-			 SET state = ?, updated_at = ?, available_at = ?, lease_expires_at = NULL, consumer = ''
-			 WHERE id = ?`,
-			string(msg.State), formatTime(msg.UpdatedAt), formatTime(msg.AvailableAt), msg.ID,
-		); err != nil {
-			return nil, fmt.Errorf("sqlite: reclaim lease %s: %w", msg.ID, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("sqlite: commit reclaim: %w", err)
-	}
-
-	return expired, nil
+	return scanMessages(rows)
 }
 
 func (s *Store) transitionLeased(ctx context.Context, id string, _ time.Time, apply func(*sql.Tx, *message.Message) error) error {

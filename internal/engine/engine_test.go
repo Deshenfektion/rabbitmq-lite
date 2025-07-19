@@ -444,7 +444,7 @@ func TestShutdownWaitsForInFlightDeliveries(t *testing.T) {
 	}
 }
 
-func TestReclaimReturnsAbandonedMessages(t *testing.T) {
+func TestExpiredLeasesAreRequeued(t *testing.T) {
 	store := memory.New()
 	defer store.Close()
 
@@ -462,17 +462,30 @@ func TestReclaimReturnsAbandonedMessages(t *testing.T) {
 	now := time.Now().UTC()
 
 	if _, err := store.Claim(ctx, storage.ClaimRequest{
-		Queue: "invoice-processing", Consumer: "crashed", Limit: 1, Lease: time.Second, Now: now,
+		Queue: "invoice-processing", Consumer: "crashed", Limit: 1, Lease: time.Millisecond, Now: now,
 	}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
-	reclaimed, err := store.ReclaimExpiredLeases(ctx, now.Add(2*time.Second))
+	time.Sleep(5 * time.Millisecond)
+
+	expired, err := store.ExpiredLeases(ctx, time.Now().UTC(), 0)
 	if err != nil {
-		t.Fatalf("reclaim: %v", err)
+		t.Fatalf("expired leases: %v", err)
 	}
 
-	if len(reclaimed) != 1 || reclaimed[0].ID != result.MessageIDs[0] {
-		t.Fatalf("expected the abandoned message to be reclaimed, got %+v", reclaimed)
+	if len(expired) != 1 || expired[0].ID != result.MessageIDs[0] {
+		t.Fatalf("expected the abandoned message to be reported, got %+v", expired)
+	}
+
+	instance.reclaim(ctx)
+
+	restored, err := store.Message(ctx, result.MessageIDs[0])
+	if err != nil {
+		t.Fatalf("message: %v", err)
+	}
+
+	if restored.State != message.StateQueued {
+		t.Fatalf("expected the message to be requeued, got %s", restored.State)
 	}
 }

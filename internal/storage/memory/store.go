@@ -335,31 +335,27 @@ func (s *Store) MarkDeadLettered(_ context.Context, id string, reason string, at
 	return nil
 }
 
-func (s *Store) ReclaimExpiredLeases(_ context.Context, now time.Time) ([]*message.Message, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) ExpiredLeases(_ context.Context, now time.Time, limit int) ([]*message.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	reclaimed := make([]*message.Message, 0)
+	expired := make([]*message.Message, 0)
 
 	for _, entry := range s.messages {
 		if entry.msg.State != message.StateProcessing || entry.lease.IsZero() || entry.lease.After(now) {
 			continue
 		}
 
-		if err := entry.msg.Transition(message.StateQueued, now); err != nil {
-			return nil, err
-		}
-
-		entry.msg.AvailableAt = now.UTC()
-		entry.lease = time.Time{}
-		entry.consumer = ""
-
-		reclaimed = append(reclaimed, entry.msg.Clone())
+		expired = append(expired, entry.msg.Clone())
 	}
 
-	sort.Slice(reclaimed, func(i, j int) bool { return reclaimed[i].ID < reclaimed[j].ID })
+	sort.Slice(expired, func(i, j int) bool { return expired[i].ID < expired[j].ID })
 
-	return reclaimed, nil
+	if limit > 0 && len(expired) > limit {
+		expired = expired[:limit]
+	}
+
+	return expired, nil
 }
 
 func (s *Store) Depth(_ context.Context, queue string) (storage.Depth, error) {

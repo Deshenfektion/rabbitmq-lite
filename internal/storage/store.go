@@ -37,7 +37,7 @@ type MessageStore interface {
 	ScheduleRetry(ctx context.Context, req RetryRequest) error
 	Release(ctx context.Context, id string, at time.Time) error
 	MarkDeadLettered(ctx context.Context, id string, reason string, at time.Time) error
-	ReclaimExpiredLeases(ctx context.Context, now time.Time) ([]*message.Message, error)
+	ExpiredLeases(ctx context.Context, now time.Time, limit int) ([]*message.Message, error)
 	Depth(ctx context.Context, queue string) (Depth, error)
 	Purge(ctx context.Context, queue string) (int, error)
 }

@@ -120,13 +120,17 @@ func TestMessagesSurviveReopen(t *testing.T) {
 		t.Fatalf("payload not durable: %s", restored.Payload)
 	}
 
-	reclaimed, err := reopened.ReclaimExpiredLeases(ctx, now.Add(time.Minute))
+	expired, err := reopened.ExpiredLeases(ctx, now.Add(time.Minute), 0)
 	if err != nil {
-		t.Fatalf("reclaim: %v", err)
+		t.Fatalf("expired leases: %v", err)
 	}
 
-	if len(reclaimed) != 1 {
-		t.Fatalf("expected lease to be reclaimable after restart, got %d", len(reclaimed))
+	if len(expired) != 1 {
+		t.Fatalf("expected lease to be reclaimable after restart, got %d", len(expired))
+	}
+
+	if err := reopened.Release(ctx, expired[0].ID, now.Add(time.Minute)); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 
 	depth, err := reopened.Depth(ctx, queue.Name)

@@ -31,7 +31,7 @@ func Run(t *testing.T, factory Factory) {
 		"ScheduleRetry":                testScheduleRetry,
 		"Release":                      testRelease,
 		"MarkDeadLettered":             testMarkDeadLettered,
-		"ReclaimExpiredLeases":         testReclaimExpiredLeases,
+		"ExpiredLeases":                testExpiredLeases,
 		"Depth":                        testDepth,
 		"Purge":                        testPurge,
 		"DeadLetterLifecycle":          testDeadLetterLifecycle,
@@ -424,32 +424,45 @@ func testMarkDeadLettered(t *testing.T, store storage.Store) {
 	}
 }
 
-func testReclaimExpiredLeases(t *testing.T, store storage.Store) {
+func testExpiredLeases(t *testing.T, store storage.Store) {
 	seedQueue(t, store, "invoice-processing")
 	seedMessages(t, store, "invoice-processing", 1)
 
 	claimed := claimOne(t, store, "invoice-processing", base)
 
-	none, err := store.ReclaimExpiredLeases(context.Background(), base.Add(10*time.Second))
+	none, err := store.ExpiredLeases(context.Background(), base.Add(10*time.Second), 0)
 	if err != nil {
-		t.Fatalf("reclaim: %v", err)
+		t.Fatalf("expired leases: %v", err)
 	}
 
 	if len(none) != 0 {
 		t.Fatalf("expected live lease to be untouched, got %d", len(none))
 	}
 
-	reclaimed, err := store.ReclaimExpiredLeases(context.Background(), base.Add(time.Minute))
+	expired, err := store.ExpiredLeases(context.Background(), base.Add(time.Minute), 0)
 	if err != nil {
-		t.Fatalf("reclaim: %v", err)
+		t.Fatalf("expired leases: %v", err)
 	}
 
-	if len(reclaimed) != 1 || reclaimed[0].ID != claimed.ID {
-		t.Fatalf("expected expired lease to be reclaimed, got %+v", reclaimed)
+	if len(expired) != 1 || expired[0].ID != claimed.ID {
+		t.Fatalf("expected the expired lease to be reported, got %+v", expired)
 	}
 
-	if reclaimed[0].State != message.StateQueued {
-		t.Fatalf("expected QUEUED after reclaim, got %s", reclaimed[0].State)
+	if expired[0].State != message.StateProcessing {
+		t.Fatalf("expired leases must not change state, got %s", expired[0].State)
+	}
+
+	if err := store.Release(context.Background(), claimed.ID, base.Add(time.Minute)); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	settled, err := store.ExpiredLeases(context.Background(), base.Add(2*time.Minute), 0)
+	if err != nil {
+		t.Fatalf("expired leases: %v", err)
+	}
+
+	if len(settled) != 0 {
+		t.Fatalf("expected released message to drop its lease, got %d", len(settled))
 	}
 }
 
