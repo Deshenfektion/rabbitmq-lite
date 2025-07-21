@@ -2,7 +2,11 @@ module github.com/deshenrao/rabbitmq-lite
 
 go 1.24
 
-require modernc.org/sqlite v1.38.0
+require (
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	golang.org/x/text v0.14.0
+	modernc.org/sqlite v1.38.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
