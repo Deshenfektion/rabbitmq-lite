@@ -11,6 +11,7 @@ import (
 	"github.com/deshenrao/rabbitmq-lite/internal/broker"
 	"github.com/deshenrao/rabbitmq-lite/internal/message"
 	"github.com/deshenrao/rabbitmq-lite/internal/retry"
+	"github.com/deshenrao/rabbitmq-lite/internal/schema"
 	"github.com/deshenrao/rabbitmq-lite/internal/storage"
 )
 
@@ -20,6 +21,7 @@ type Options struct {
 	Logger     *slog.Logger
 	Retry      retry.Policy
 	Randomiser retry.Randomiser
+	Schemas    *schema.Registry
 
 	ReclaimInterval time.Duration
 }
@@ -31,6 +33,7 @@ type Engine struct {
 	logger     *slog.Logger
 	policy     retry.Policy
 	randomiser retry.Randomiser
+	schemas    *schema.Registry
 
 	reclaimInterval time.Duration
 
@@ -78,6 +81,7 @@ func New(opts Options) (*Engine, error) {
 		logger:     opts.Logger,
 		policy:     policy,
 		randomiser: opts.Randomiser,
+		schemas:    opts.Schemas,
 
 		reclaimInterval: opts.ReclaimInterval,
 
@@ -258,6 +262,10 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 
 		if msg.Schema == "" {
 			msg.Schema = queue.Schema
+		}
+
+		if err := e.validate(ctx, msg, now); err != nil {
+			return nil, err
 		}
 
 		if err := msg.Transition(message.StateQueued, now); err != nil {
