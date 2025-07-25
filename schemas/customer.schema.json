@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rabbitmq-lite.local/schemas/customer",
+  "title": "Customer master record",
+  "description": "Customer master data exported from the ERP customer module.",
+  "x-schema-version": 1,
+  "type": "object",
+  "required": ["customer_id", "name", "country", "exported_at"],
+  "additionalProperties": false,
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "pattern": "^C-[0-9]{4,8}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "vat_id": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{8,12}$"
+    },
+    "country": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "credit_limit": {
+      "type": "number",
+      "minimum": 0
+    },
+    "payment_terms_days": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 180
+    },
+    "blocked": {
+      "type": "boolean",
+      "default": false
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rabbitmq-lite.local/schemas/employee",
+  "title": "Employee synchronisation record",
+  "description": "Employee master data replicated from the ERP HR module into downstream systems.",
+  "x-schema-version": 1,
+  "type": "object",
+  "required": ["employee_id", "cost_center", "status", "valid_from"],
+  "additionalProperties": false,
+  "properties": {
+    "employee_id": {
+      "type": "string",
+      "pattern": "^E-[0-9]{5,8}$"
+    },
+    "cost_center": {
+      "type": "string",
+      "pattern": "^CC-[0-9]{3,6}$"
+    },
+    "department": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "on_leave", "terminated"]
+    },
+    "weekly_hours": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date"
+    },
+    "valid_to": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

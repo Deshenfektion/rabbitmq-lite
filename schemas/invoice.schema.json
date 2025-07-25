@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rabbitmq-lite.local/schemas/invoice",
+  "title": "Outgoing invoice",
+  "description": "Invoice header and line items handed over to the invoicing pipeline.",
+  "x-schema-version": 2,
+  "type": "object",
+  "required": ["invoice_id", "customer_id", "currency", "issued_on", "lines"],
+  "additionalProperties": false,
+  "properties": {
+    "invoice_id": {
+      "type": "string",
+      "pattern": "^INV-[0-9]{4,10}$"
+    },
+    "customer_id": {
+      "type": "string",
+      "pattern": "^C-[0-9]{4,8}$"
+    },
+    "currency": {
+      "type": "string",
+      "enum": ["EUR", "USD", "CHF", "GBP"]
+    },
+    "issued_on": {
+      "type": "string",
+      "format": "date"
+    },
+    "due_on": {
+      "type": "string",
+      "format": "date"
+    },
+    "purchase_order": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": ["position", "sku", "quantity", "unit_price_net"],
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "unit_price_net": {
+            "type": "number",
+            "minimum": 0
+          },
+          "tax_rate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  }
+}

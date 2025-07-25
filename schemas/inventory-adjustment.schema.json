@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rabbitmq-lite.local/schemas/inventory-adjustment",
+  "title": "Inventory adjustment",
+  "description": "Stock movement emitted by the warehouse management module.",
+  "x-schema-version": 1,
+  "type": "object",
+  "required": ["sku", "warehouse", "delta", "reason", "recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "sku": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "warehouse": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}-[0-9]{2}$"
+    },
+    "delta": {
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["goods_receipt", "goods_issue", "stocktake", "scrap", "return"]
+    },
+    "reference": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
