@@ -16,11 +16,11 @@ const (
 )
 
 type Policy struct {
-	MaxAttempts     int           `json:"max_attempts" yaml:"max_attempts"`
-	InitialInterval time.Duration `json:"initial_interval" yaml:"initial_interval"`
-	MaxInterval     time.Duration `json:"max_interval" yaml:"max_interval"`
-	Multiplier      float64       `json:"multiplier" yaml:"multiplier"`
-	JitterFraction  float64       `json:"jitter_fraction" yaml:"jitter_fraction"`
+	MaxAttempts     int           `json:"max_attempts"`
+	InitialInterval time.Duration `json:"initial_interval"`
+	MaxInterval     time.Duration `json:"max_interval"`
+	Multiplier      float64       `json:"multiplier"`
+	JitterFraction  float64       `json:"jitter_fraction"`
 }
 
 type Randomiser interface {
