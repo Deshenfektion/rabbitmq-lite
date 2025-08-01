@@ -81,9 +81,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/queues/{name}", s.handleDeleteQueue)
 	mux.HandleFunc("POST /api/v1/queues/{name}/purge", s.handlePurgeQueue)
 
+	mux.HandleFunc("POST /api/v1/queues/{name}/consume", s.handleConsume)
+
 	mux.HandleFunc("POST /api/v1/messages", s.handlePublish)
 	mux.HandleFunc("GET /api/v1/messages/{id}", s.handleGetMessage)
 	mux.HandleFunc("GET /api/v1/messages/{id}/history", s.handleGetMessageHistory)
+	mux.HandleFunc("POST /api/v1/messages/{id}/ack", s.handleAck)
+	mux.HandleFunc("POST /api/v1/messages/{id}/nack", s.handleNack)
 
 	mux.HandleFunc("POST /api/v1/bindings", s.handleBind)
 	mux.HandleFunc("GET /api/v1/bindings", s.handleListBindings)

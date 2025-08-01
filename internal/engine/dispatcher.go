@@ -207,7 +207,7 @@ func (e *Engine) process(ctx context.Context, consumer *Consumer, delivery Deliv
 		return
 	}
 
-	e.fail(completionCtx, consumer, delivery, err)
+	e.fail(completionCtx, consumer.spec.Name, delivery, err)
 }
 
 func (e *Engine) acknowledge(ctx context.Context, consumer *Consumer, delivery Delivery, started time.Time) {
@@ -238,12 +238,12 @@ func (e *Engine) acknowledge(ctx context.Context, consumer *Consumer, delivery D
 	)
 }
 
-func (e *Engine) fail(ctx context.Context, consumer *Consumer, delivery Delivery, cause error) {
+func (e *Engine) fail(ctx context.Context, consumer string, delivery Delivery, cause error) {
 	now := e.clock()
 	retryable := !isPermanent(cause) && e.policy.ShouldRetry(delivery.Attempt)
 
 	if !retryable {
-		e.deadLetter(ctx, consumer.spec.Name, delivery, cause, now)
+		e.deadLetter(ctx, consumer, delivery, cause, now)
 		return
 	}
 
@@ -269,7 +269,7 @@ func (e *Engine) fail(ctx context.Context, consumer *Consumer, delivery Delivery
 		Queue:     delivery.Queue,
 		From:      message.StateFailed,
 		To:        message.StateRetrying,
-		Consumer:  consumer.spec.Name,
+		Consumer:  consumer,
 		Detail:    cause.Error(),
 		At:        now,
 	})
