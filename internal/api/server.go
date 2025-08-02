@@ -89,6 +89,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/messages/{id}/ack", s.handleAck)
 	mux.HandleFunc("POST /api/v1/messages/{id}/nack", s.handleNack)
 
+	mux.HandleFunc("GET /api/v1/dead-letter", s.handleListDeadLetters)
+	mux.HandleFunc("GET /api/v1/dead-letter/{id}", s.handleGetDeadLetter)
+	mux.HandleFunc("POST /api/v1/dead-letter/{id}/retry", s.handleRetryDeadLetter)
+	mux.HandleFunc("DELETE /api/v1/dead-letter/{id}", s.handleDeleteDeadLetter)
+
+	mux.HandleFunc("GET /api/v1/schemas", s.handleListSchemas)
+	mux.HandleFunc("GET /api/v1/consumers", s.handleListConsumers)
+
 	mux.HandleFunc("POST /api/v1/bindings", s.handleBind)
 	mux.HandleFunc("GET /api/v1/bindings", s.handleListBindings)
 	mux.HandleFunc("DELETE /api/v1/bindings", s.handleUnbind)
