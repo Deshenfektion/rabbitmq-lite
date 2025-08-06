@@ -72,6 +72,8 @@ func (e *Engine) deadLetter(ctx context.Context, consumer string, delivery Deliv
 		At:        now,
 	})
 
+	e.metrics.MessageDeadLettered(delivery.Queue, record.ErrorKind)
+
 	e.logger.Warn("message dead lettered",
 		slog.String("message_id", delivery.Message.ID),
 		slog.String("dead_letter_id", record.ID),

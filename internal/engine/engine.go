@@ -22,6 +22,7 @@ type Options struct {
 	Retry      retry.Policy
 	Randomiser retry.Randomiser
 	Schemas    *schema.Registry
+	Metrics    Metrics
 
 	ReclaimInterval time.Duration
 }
@@ -34,6 +35,7 @@ type Engine struct {
 	policy     retry.Policy
 	randomiser retry.Randomiser
 	schemas    *schema.Registry
+	metrics    Metrics
 
 	reclaimInterval time.Duration
 
@@ -70,6 +72,10 @@ func New(opts Options) (*Engine, error) {
 		return nil, err
 	}
 
+	if opts.Metrics == nil {
+		opts.Metrics = noopMetrics{}
+	}
+
 	if opts.ReclaimInterval <= 0 {
 		opts.ReclaimInterval = defaultReclaimInterval
 	}
@@ -82,6 +88,7 @@ func New(opts Options) (*Engine, error) {
 		policy:     policy,
 		randomiser: opts.Randomiser,
 		schemas:    opts.Schemas,
+		metrics:    opts.Metrics,
 
 		reclaimInterval: opts.ReclaimInterval,
 
@@ -247,6 +254,7 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 		return nil, err
 	}
 
+	started := time.Now()
 	now := e.clock()
 	messages := make([]*message.Message, 0, len(queues))
 	result := &PublishResult{
@@ -265,6 +273,7 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 		}
 
 		if err := e.validate(ctx, msg, now); err != nil {
+			e.metrics.MessageRejected(queue.Name)
 			return nil, err
 		}
 
@@ -289,6 +298,11 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 			To:        message.StateQueued,
 			At:        now,
 		})
+	}
+
+	latency := time.Since(started)
+	for _, queue := range result.Queues {
+		e.metrics.MessagePublished(queue, latency)
 	}
 
 	e.notify(result.Queues)

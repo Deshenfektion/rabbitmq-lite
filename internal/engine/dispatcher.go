@@ -169,6 +169,8 @@ func (e *Engine) handOff(ctx context.Context, consumer *Consumer, msg *message.M
 		At:        e.clock(),
 	})
 
+	e.metrics.MessageDelivered(msg.Queue)
+
 	err := consumer.pool.Submit(ctx, func(taskCtx context.Context) {
 		e.process(taskCtx, consumer, delivery)
 	})
@@ -231,6 +233,8 @@ func (e *Engine) acknowledge(ctx context.Context, consumer *Consumer, delivery D
 		At:        now,
 	})
 
+	e.metrics.MessageAcknowledged(delivery.Queue, now.Sub(started))
+
 	e.logger.Debug("message acknowledged",
 		slog.String("message_id", delivery.Message.ID),
 		slog.String("queue", delivery.Queue),
@@ -273,6 +277,8 @@ func (e *Engine) fail(ctx context.Context, consumer string, delivery Delivery, c
 		Detail:    cause.Error(),
 		At:        now,
 	})
+
+	e.metrics.MessageRetried(delivery.Queue)
 
 	e.logger.Warn("delivery failed, retry scheduled",
 		slog.String("message_id", delivery.Message.ID),

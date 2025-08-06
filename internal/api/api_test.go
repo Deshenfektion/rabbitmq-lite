@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/deshenrao/rabbitmq-lite/internal/broker"
 	"github.com/deshenrao/rabbitmq-lite/internal/engine"
 	"github.com/deshenrao/rabbitmq-lite/internal/message"
+	"github.com/deshenrao/rabbitmq-lite/internal/metrics"
 	"github.com/deshenrao/rabbitmq-lite/internal/retry"
 	"github.com/deshenrao/rabbitmq-lite/internal/schema"
 	"github.com/deshenrao/rabbitmq-lite/internal/storage"
@@ -47,10 +49,12 @@ func newHarness(t *testing.T) *harness {
 	}
 
 	store := memory.New()
+	collector := metrics.NewCollector(metrics.NewRegistry())
 
 	instance, err := engine.New(engine.Options{
 		Store:   store,
 		Schemas: registry,
+		Metrics: collector,
 		Logger:  slog.New(slog.DiscardHandler),
 		Retry: retry.Policy{
 			MaxAttempts:     2,
@@ -68,6 +72,7 @@ func newHarness(t *testing.T) *harness {
 	server := httptest.NewServer(api.New(api.Options{
 		Engine:  instance,
 		Schemas: registry,
+		Metrics: collector.Registry(),
 		Logger:  slog.New(slog.DiscardHandler),
 		Version: "test",
 	}))
@@ -540,5 +545,34 @@ func TestBrokerReportsExchangeBindings(t *testing.T) {
 
 	if len(view.Bindings) != 1 || view.Bindings[0].RoutingKey != "inventory.#" {
 		t.Fatalf("unexpected bindings %+v", view.Bindings)
+	}
+}
+
+func TestMetricsEndpointExposesBrokerCounters(t *testing.T) {
+	h := newHarness(t)
+	h.declareTopology(t)
+
+	h.publish(t, map[string]any{"sku": "PALLET-EUR", "delta": 2}, http.StatusAccepted)
+
+	response, payload := h.do(t, http.MethodGet, "/metrics", nil)
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+
+	if contentType := response.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/plain") {
+		t.Fatalf("unexpected content type %q", contentType)
+	}
+
+	exposition := string(payload)
+
+	for _, expected := range []string{
+		`rabbitmq_lite_messages_published_total{queue="inventory-sync"} 1`,
+		`rabbitmq_lite_queue_depth{queue="inventory-sync"} 1`,
+		"rabbitmq_lite_publish_duration_seconds_count 1",
+	} {
+		if !strings.Contains(exposition, expected) {
+			t.Errorf("expected %q in the exposition:\n%s", expected, exposition)
+		}
 	}
 }

@@ -32,6 +32,7 @@ func (e *Engine) startMaintenance(ctx context.Context) {
 				return
 			case <-ticker.C:
 				e.reclaim(ctx)
+				e.RefreshQueueDepths(ctx)
 			}
 		}
 	}()

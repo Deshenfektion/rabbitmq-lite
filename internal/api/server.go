@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/deshenrao/rabbitmq-lite/internal/engine"
+	"github.com/deshenrao/rabbitmq-lite/internal/metrics"
 	"github.com/deshenrao/rabbitmq-lite/internal/schema"
 )
 
@@ -14,6 +15,7 @@ const defaultMaxBodyBytes = 1 << 20
 type Options struct {
 	Engine       *engine.Engine
 	Schemas      *schema.Registry
+	Metrics      *metrics.Registry
 	Logger       *slog.Logger
 	MaxBodyBytes int64
 	Version      string
@@ -23,6 +25,7 @@ type Options struct {
 type Server struct {
 	engine       *engine.Engine
 	schemas      *schema.Registry
+	metrics      *metrics.Registry
 	logger       *slog.Logger
 	maxBodyBytes int64
 	version      string
@@ -50,6 +53,7 @@ func New(opts Options) *Server {
 	server := &Server{
 		engine:       opts.Engine,
 		schemas:      opts.Schemas,
+		metrics:      opts.Metrics,
 		logger:       opts.Logger,
 		maxBodyBytes: opts.MaxBodyBytes,
 		version:      opts.Version,
@@ -70,6 +74,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	mux.HandleFunc("POST /api/v1/exchanges", s.handleDeclareExchange)
 	mux.HandleFunc("GET /api/v1/exchanges", s.handleListExchanges)
