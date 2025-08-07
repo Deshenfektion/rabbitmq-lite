@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/deshenrao/rabbitmq-lite/internal/logging"
 	"github.com/deshenrao/rabbitmq-lite/internal/retry"
 )
 
@@ -208,7 +209,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: unsupported logging format %q", c.Logging.Format)
 	}
 
-	if _, err := ParseLevel(c.Logging.Level); err != nil {
+	if _, err := logging.ParseLevel(c.Logging.Level); err != nil {
 		return err
 	}
 
