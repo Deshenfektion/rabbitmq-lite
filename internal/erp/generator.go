@@ -68,7 +68,7 @@ func (g *Generator) CustomerExport() message.Publication {
 		routingKey = RoutingCustomerUpdated
 	}
 
-	return g.publication(routingKey, "customer", customer, map[string]string{
+	return g.publication(routingKey, customer, map[string]string{
 		"erp-module": "SD",
 		"tenant":     "acme",
 	})
@@ -99,7 +99,7 @@ func (g *Generator) Invoice() message.Publication {
 		Lines:         lines,
 	}
 
-	return g.publication(RoutingInvoiceIssued, "invoice", invoice, map[string]string{
+	return g.publication(RoutingInvoiceIssued, invoice, map[string]string{
 		"erp-module": "FI",
 		"tenant":     "acme",
 	})
@@ -122,7 +122,7 @@ func (g *Generator) InventoryAdjustment() message.Publication {
 		RecordedAt: g.clock(),
 	}
 
-	return g.publication(RoutingInventoryAdjust, "inventory-adjustment", adjustment, map[string]string{
+	return g.publication(RoutingInventoryAdjust, adjustment, map[string]string{
 		"erp-module": "MM",
 		"tenant":     "acme",
 	})
@@ -144,7 +144,7 @@ func (g *Generator) EmployeeChange() message.Publication {
 		employee.ValidTo = validFrom.AddDate(0, 1, 0).Format(time.DateOnly)
 	}
 
-	return g.publication(RoutingEmployeeModified, "employee", employee, map[string]string{
+	return g.publication(RoutingEmployeeModified, employee, map[string]string{
 		"erp-module": "HR",
 		"tenant":     "acme",
 	})
@@ -159,14 +159,14 @@ func (g *Generator) MalformedInvoice() message.Publication {
 		"lines":       []any{},
 	}
 
-	return g.publication(RoutingInvoiceIssued, "invoice", broken, map[string]string{
+	return g.publication(RoutingInvoiceIssued, broken, map[string]string{
 		"erp-module":  "FI",
 		"tenant":      "acme",
 		"export-file": "legacy_invoice_batch.csv",
 	})
 }
 
-func (g *Generator) publication(routingKey, schemaName string, payload any, headers map[string]string) message.Publication {
+func (g *Generator) publication(routingKey string, payload any, headers map[string]string) message.Publication {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		encoded = []byte(`{}`)
@@ -177,7 +177,6 @@ func (g *Generator) publication(routingKey, schemaName string, payload any, head
 		RoutingKey: routingKey,
 		Payload:    encoded,
 		Headers:    headers,
-		Schema:     schemaName,
 	}
 }
 
