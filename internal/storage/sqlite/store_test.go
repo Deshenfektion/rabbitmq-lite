@@ -142,3 +142,16 @@ func TestMessagesSurviveReopen(t *testing.T) {
 		t.Fatalf("expected message to be ready again, got %+v", depth)
 	}
 }
+
+func BenchmarkSQLiteStore(b *testing.B) {
+	storagetest.Benchmark(b, func(b *testing.B) storage.Store {
+		store, err := sqlite.Open(context.Background(), sqlite.Options{
+			DSN: filepath.Join(b.TempDir(), "bench.db"),
+		})
+		if err != nil {
+			b.Fatalf("open sqlite store: %v", err)
+		}
+
+		return store
+	})
+}

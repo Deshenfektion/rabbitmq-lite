@@ -13,3 +13,9 @@ func TestMemoryStoreConformance(t *testing.T) {
 		return memory.New()
 	})
 }
+
+func BenchmarkMemoryStore(b *testing.B) {
+	storagetest.Benchmark(b, func(b *testing.B) storage.Store {
+		return memory.New()
+	})
+}
