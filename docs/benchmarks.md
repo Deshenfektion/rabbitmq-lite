@@ -84,9 +84,9 @@ cycle with a no-op handler on the in-memory store.
 
 | Workers | ns/op | messages/s | allocs/op |
 |---|---:|---:|---:|
-| 1 | 11 489 | ~87 000 | 40 |
-| 4 | 11 956 | ~84 000 | 40 |
-| 16 | 13 162 | ~76 000 | 40 |
+| 1 | 5 095 | ~196 000 | 40 |
+| 4 | 5 037 | ~199 000 | 40 |
+| 16 | 5 674 | ~176 000 | 40 |
 
 **Adding workers does not help, and past a point it hurts.** That is the honest
 and expected result: the handler does no work, so the benchmark measures pure
@@ -95,7 +95,7 @@ pressure and contention on the store lock. Worker pools pay off when handlers
 block on I/O — which is exactly what `cmd/erpsim` demonstrates, where a 2 ms
 simulated downstream call makes concurrency the dominant factor.
 
-The number to take from this table is the coordination floor: roughly 12 µs and
+The number to take from this table is the coordination floor: roughly 5 µs and
 40 allocations per message for dispatch, lease, handler invocation and ack.
 
 ## Retry overhead
@@ -105,13 +105,13 @@ so the expected added delay is ~1 ms for one failure and ~3 ms for two.
 
 | Failures before success | ns/op | Δ vs no failure |
 |---|---:|---:|
-| 0 | 11 672 | – |
-| 1 | 142 526 | +131 µs |
-| 2 | 279 990 | +268 µs |
+| 0 | 5 068 | – |
+| 1 | 140 048 | +135 µs |
+| 2 | 276 370 | +271 µs |
 
 Nearly all of the added cost is deliberate waiting, not work: the backoff timer
 plus one extra claim/dispatch cycle. Amortised across the 4 concurrent workers
-in the benchmark, a retry costs about 131 µs of wall clock per message. The
+in the benchmark, a retry costs about 135 µs of wall clock per message. The
 mechanical overhead — the state transitions, the history rows, the re-claim — is
 a small fraction of that.
 
@@ -128,26 +128,31 @@ Measured directly against the `storage.Store` interface, bypassing the engine.
 |---|---:|---:|---:|
 | `AppendSingle` | 2 470 ns | 70 879 ns | 29× |
 | `AppendBatch32` | 44 809 ns (1 400 ns/msg) | 616 299 ns (19 259 ns/msg) | 14× |
-| `Claim` (1 message) | 26 175 ns | 110 923 ns | 4× |
-| `DeliveryCycle` (claim + ack) | 27 208 ns | 169 201 ns | 6× |
+| `Claim` (1 message, nothing acknowledged) | 27 269 ns | 110 923 ns | 4× |
+| `DeliveryCycle` (claim + ack) | 488 ns | 169 201 ns | 347× |
 
 Batching is the clearest win available: appending 32 messages in one SQLite
 transaction costs 19 µs per message against 71 µs for individual appends, a 3.7×
 improvement, because the WAL commit is amortised.
 
-### Known issue: memory store claim is O(pending)
+### A note on the memory store index
 
-`BenchmarkMemoryStore/Claim` costs 4.4 µs at `-benchtime 200x` but 26 µs at
-`-benchtime 2000x`. That is not noise — the in-memory store keeps a per-queue
-insertion-ordered index that it never prunes, so every claim rescans the
-acknowledged messages ahead of the cursor. The cost grows with the number of
-messages the queue has ever held rather than with the number currently pending.
+The in-memory store originally kept a per-queue insertion-ordered index that it
+never pruned, so every claim rescanned the settled messages ahead of it and the
+cost grew with everything the queue had ever held. `DeliveryCycle` measured
+27 µs at `-benchtime 2000x` against 2.4 µs at `200x` — the growth was the bug,
+not the absolute number. Trimming settled messages off the head of the index on
+each claim made it flat: 488 ns at `2000x`, 617 ns at `8000x`.
 
-SQLite does not have this problem: `idx_messages_ready` covers
+`Claim` in isolation still grows with `-benchtime`, and that is expected rather
+than broken: the benchmark never acknowledges anything, so every claimed message
+stays in flight and a linear scan past them is unavoidable without a separate
+ready index. In a running broker the in-flight set is bounded by prefetch times
+consumer count, not by queue history. The same reading applies to
+`BenchmarkClaimBatch`.
+
+SQLite never had this shape: `idx_messages_ready` covers
 `(queue, state, available_at, seq)`, so claims are an index range scan.
-
-This is worth fixing rather than documenting away, and the same caveat applies
-to `BenchmarkClaimBatch`, whose growth with `-benchtime` has the same cause.
 
 ## Limitations
 

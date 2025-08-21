@@ -17,6 +17,8 @@ type record struct {
 	consumer string
 }
 
+const compactionThreshold = 64
+
 type Store struct {
 	mu          sync.RWMutex
 	closed      bool
@@ -25,6 +27,7 @@ type Store struct {
 	bindings    map[string]broker.Binding
 	messages    map[string]*record
 	order       map[string][]string
+	settled     map[string]int
 	deadLetters map[string]*storage.DeadLetter
 	deadOrder   []string
 	history     map[string][]storage.HistoryEvent
@@ -37,6 +40,7 @@ func New() *Store {
 		bindings:    make(map[string]broker.Binding),
 		messages:    make(map[string]*record),
 		order:       make(map[string][]string),
+		settled:     make(map[string]int),
 		deadLetters: make(map[string]*storage.DeadLetter),
 		history:     make(map[string][]storage.HistoryEvent),
 	}
@@ -124,6 +128,7 @@ func (s *Store) DeleteQueue(_ context.Context, name string) error {
 	}
 
 	delete(s.order, name)
+	delete(s.settled, name)
 
 	return nil
 }
@@ -213,6 +218,8 @@ func (s *Store) Claim(_ context.Context, req storage.ClaimRequest) ([]*message.M
 		return nil, storage.ErrClosed
 	}
 
+	s.compactLocked(req.Queue)
+
 	claimed := make([]*message.Message, 0, req.Limit)
 
 	for _, id := range s.order[req.Queue] {
@@ -258,6 +265,7 @@ func (s *Store) Acknowledge(_ context.Context, id string, at time.Time) error {
 		return err
 	}
 
+	s.settled[entry.msg.Queue]++
 	entry.lease = time.Time{}
 	entry.consumer = ""
 
@@ -328,6 +336,7 @@ func (s *Store) MarkDeadLettered(_ context.Context, id string, reason string, at
 		return err
 	}
 
+	s.settled[entry.msg.Queue]++
 	entry.msg.LastError = reason
 	entry.lease = time.Time{}
 	entry.consumer = ""
@@ -416,8 +425,47 @@ func (s *Store) Purge(_ context.Context, queue string) (int, error) {
 	}
 
 	s.order[queue] = remaining
+	s.settled[queue] = len(remaining)
 
 	return purged, nil
+}
+
+func (s *Store) compactLocked(queue string) {
+	index := s.order[queue]
+
+	head := 0
+	for head < len(index) && s.isSettledLocked(index[head]) {
+		head++
+	}
+
+	if head > 0 {
+		index = index[head:]
+		s.order[queue] = index
+		s.settled[queue] = max(s.settled[queue]-head, 0)
+	}
+
+	settled := s.settled[queue]
+	if settled < compactionThreshold || settled*2 < len(index) {
+		return
+	}
+
+	retained := make([]string, 0, len(index)-settled)
+
+	for _, id := range index {
+		if s.isSettledLocked(id) {
+			continue
+		}
+
+		retained = append(retained, id)
+	}
+
+	s.order[queue] = retained
+	s.settled[queue] = 0
+}
+
+func (s *Store) isSettledLocked(id string) bool {
+	entry := s.messages[id]
+	return entry == nil || entry.msg.State.Terminal()
 }
 
 func (s *Store) leased(id string) (*record, error) {
