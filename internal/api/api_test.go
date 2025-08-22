@@ -180,9 +180,19 @@ func (h *harness) publish(t *testing.T, payload map[string]any, status int) []by
 
 func TestHealthAndReadiness(t *testing.T) {
 	h := newHarness(t)
+	h.declareTopology(t)
 
 	h.expect(t, http.MethodGet, "/healthz", nil, http.StatusOK)
-	h.expect(t, http.MethodGet, "/readyz", nil, http.StatusOK)
+
+	readiness := decode[map[string]any](t, h.expect(t, http.MethodGet, "/readyz", nil, http.StatusOK))
+
+	if readiness["status"] != "ready" {
+		t.Fatalf("unexpected readiness payload %v", readiness)
+	}
+
+	if readiness["queues"] != float64(1) || readiness["exchanges"] != float64(1) {
+		t.Fatalf("expected the declared topology to be reported, got %v", readiness)
+	}
 }
 
 func TestRequestIDIsEchoed(t *testing.T) {

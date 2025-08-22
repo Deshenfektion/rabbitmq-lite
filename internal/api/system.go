@@ -16,20 +16,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	queues := s.engine.Registry().QueueNames()
-
-	for _, name := range queues {
-		if _, err := s.engine.Depth(r.Context(), name); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "storage_unavailable", err.Error())
-			return
-		}
-
-		break
+	if err := s.engine.Ping(r.Context()); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", err.Error())
+		return
 	}
 
+	registry := s.engine.Registry()
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ready",
-		"queues": len(queues),
+		"status":    "ready",
+		"queues":    len(registry.QueueNames()),
+		"exchanges": len(registry.Exchanges()),
+		"consumers": len(s.engine.Consumers()),
 	})
 }
 

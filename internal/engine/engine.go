@@ -310,6 +310,14 @@ func (e *Engine) Publish(ctx context.Context, pub message.Publication) (*Publish
 	return result, nil
 }
 
+func (e *Engine) Ping(ctx context.Context) error {
+	if _, err := e.store.Queues(ctx); err != nil {
+		return fmt.Errorf("engine: storage probe failed: %w", err)
+	}
+
+	return nil
+}
+
 func (e *Engine) Message(ctx context.Context, id string) (*message.Message, error) {
 	return e.store.Message(ctx, id)
 }

@@ -11,7 +11,7 @@ func (s *Server) handleListDeadLetters(w http.ResponseWriter, r *http.Request) {
 		Queue:  r.URL.Query().Get("queue"),
 		Limit:  intQuery(r, "limit", 0),
 		Offset: intQuery(r, "offset", 0),
-	}
+	}.Normalise()
 
 	entries, err := s.engine.DeadLetters(r.Context(), filter)
 	if err != nil {
@@ -28,8 +28,8 @@ func (s *Server) handleListDeadLetters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dead_letters": entries,
 		"total":        total,
-		"limit":        filter.Normalise().Limit,
-		"offset":       filter.Normalise().Offset,
+		"limit":        filter.Limit,
+		"offset":       filter.Offset,
 	})
 }
 
